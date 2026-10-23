@@ -12,7 +12,11 @@
          border:0;background:#4a90e2;color:#fff;font-weight:bold}
   button:active{background:#2c5f9e}
   .btn-diag{background:#357abd}
-  #btn-stop{background:#d9534f}
+  
+  /* Botón de Disparo Puerto E */
+  #btn-disparo{background:#e74c3c;font-size:28px;box-shadow:0 4px 10px rgba(231,76,60,0.5)}
+  #btn-disparo:active{background:#c0392b;transform:scale(0.95)}
+
   #conectar{width:auto;height:auto;font-size:18px;padding:12px 22px;background:#2e9e5b}
   #estado{min-height:1.5em}
 
@@ -37,7 +41,8 @@
     <button class="btn-diag" data-c="D">↗</button>
 
     <button data-c="L">←</button>
-    <button id="btn-stop" data-c="S">■</button>
+    <!-- Botón Rojo dedicado al Disparo (Puerto E) -->
+    <button id="btn-disparo">🎯</button>
     <button data-c="R">→</button>
 
     <button class="btn-diag" data-c="G">↙</button>
@@ -66,9 +71,9 @@ const SERVICE = "c5f50001-8280-46da-89f4-6d8051e4aeef";
 const CHAR    = "c5f50002-8280-46da-89f4-6d8051e4aeef";
 const estado  = document.getElementById("estado");
 
-let ch = null, cmd = "S", busy = false, timer = null, corriendo = null;
+let ch = null, cmd = "STOP_IDLE", busy = false, timer = null, corriendo = null;
 let porcentajeMecanismo = 0;
-let bloqueadoPorMecanismo = false; // Pausa el envío constante de chasis para dar prioridad
+let bloqueadoPorAccion = false;
 
 const esperar = ms => new Promise(r => setTimeout(r, ms));
 
@@ -80,26 +85,46 @@ function actualizarBarra() {
   txt.textContent = `${porcentajeMecanismo}% (${grados}°)`;
 }
 
+async function enviarDisparo() {
+  if (!ch) return;
+  bloqueadoPorAccion = true;
+  try {
+    const msg = new TextEncoder().encode("S0");
+    const data = new Uint8Array(msg.length + 1);
+    data[0] = 0x06;
+    data.set(msg, 1);
+    await ch.writeValueWithResponse(data);
+  } catch (err) {
+    console.log("Error al disparar:", err);
+  } finally {
+    await esperar(200);
+    bloqueadoPorAccion = false;
+  }
+}
+
 async function enviarComandoMecanismo(pct) {
   if (!ch) return;
-  bloqueadoPorMecanismo = true; // Bloquea temporalmente el envío de comandos de chasis
+  bloqueadoPorAccion = true;
   try {
-    const nivel = Math.round(pct / 10); // 0 a 10
-    const charNivel = String.fromCharCode(97 + nivel); // 'a' hasta 'k'
+    const nivel = Math.round(pct / 10);
+    const charNivel = String.fromCharCode(97 + nivel);
     const msg = new TextEncoder().encode("C" + charNivel);
     const data = new Uint8Array(msg.length + 1);
     data[0] = 0x06;
     data.set(msg, 1);
-    
-    // Forzar reintentos de envío en caso de colisión Bluetooth
     await ch.writeValueWithResponse(data);
   } catch (err) { 
     console.log("Error enviando mecanismo:", err); 
   } finally {
-    await esperar(150); // Pequeña pausa para asegurar la recepción en el Hub
-    bloqueadoPorMecanismo = false;
+    await esperar(150);
+    bloqueadoPorAccion = false;
   }
 }
+
+// Evento Disparo en botón rojo central
+document.getElementById("btn-disparo").onclick = () => {
+  enviarDisparo();
+};
 
 document.getElementById("btn-menos").onclick = () => {
   if (porcentajeMecanismo > 0) {
@@ -169,9 +194,8 @@ document.getElementById("conectar").onclick = async () => {
 
     estado.textContent = "Conectado ✔";
 
-    // Enviar comandos del chasis 10 veces por segundo si no hay orden de mecanismo
     timer = setInterval(async () => {
-      if (busy || !ch || bloqueadoPorMecanismo) return;
+      if (busy || !ch || bloqueadoPorAccion || cmd === "STOP_IDLE") return;
       busy = true;
       try {
         const vel = document.getElementById("vel").value;
@@ -189,10 +213,11 @@ document.getElementById("conectar").onclick = async () => {
   }
 };
 
+// Controles de dirección del chasis
 document.querySelectorAll(".grid-control button[data-c]").forEach(b => {
   b.addEventListener("pointerdown", () => cmd = b.dataset.c);
   ["pointerup", "pointerleave", "pointercancel"].forEach(ev =>
-    b.addEventListener(ev, () => cmd = "S"));
+    b.addEventListener(ev, () => cmd = "STOP_IDLE"));
 });
 </script>
 </body>
